@@ -9,9 +9,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
 	"github.com/Azure/azure-sdk-for-go/arm/storage"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/Azure/go-autorest/autorest/utils"
 )
 
 var (
@@ -45,19 +45,11 @@ var (
 )
 
 func init() {
-	subscriptionID = getEnvVarOrExit("AZURE_SUBSCRIPTION_ID")
-	tenantID := getEnvVarOrExit("AZURE_TENANT_ID")
+	authorizer, err := utils.GetAuthorizer(azure.PublicCloud)
+	onErrorFail(err, "GetAuthorizer failed")
 
-	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
-	onErrorFail(err, "OAuthConfigForTenant failed")
-
-	clientID := getEnvVarOrExit("AZURE_CLIENT_ID")
-	clientSecret := getEnvVarOrExit("AZURE_CLIENT_SECRET")
-	spToken, err := adal.NewServicePrincipalToken(*oauthConfig, clientID, clientSecret, azure.PublicCloud.ResourceManagerEndpoint)
-	authorizer = autorest.NewBearerAuthorizer(spToken)
-	onErrorFail(err, "NewServicePrincipalToken failed")
-
-	createClients()
+	subscriptionID = utils.GetEnvVarOrExit("AZURE_SUBSCRIPTION_ID")
+	createClients(subscriptionID, authorizer)
 }
 
 func main() {
@@ -174,10 +166,12 @@ func main() {
 			AddressPrefix: to.StringPtr("10.0.0.0/24"),
 		},
 	}
-	subnetChan, errSubnet := subnetClient.CreateOrUpdate(groupName, vNetName, subnetName, subnet, nil)
+	_, errSubnet := subnetClient.CreateOrUpdate(groupName, vNetName, subnetName, subnet, nil)
 	onErrorFail(<-errSubnet, "CreateOrUpdate Subnet failed")
 	fmt.Println("... subnet created")
-	subnet = <-subnetChan
+
+	subnet, err = subnetClient.Get(groupName, vNetName, subnetName, "")
+	onErrorFail(err, "Get Subnet failed")
 
 	fmt.Println("Creating availability set")
 	availSet := compute.AvailabilitySet{
@@ -221,33 +215,44 @@ func main() {
 }
 
 // createClients initializes and adds token to all needed clients in the sample.
-func createClients() {
+func createClients(subscriptionID string, authorizer *autorest.BearerAuthorizer) {
+	sampleUA := fmt.Sprintf("Azure-Samples/network-go-manage-loadbalancer/%s", utils.GetCommit())
+
 	groupClient = resources.NewGroupsClient(subscriptionID)
 	groupClient.Authorizer = authorizer
+	groupClient.Client.AddToUserAgent(sampleUA)
 
 	lbClient = network.NewLoadBalancersClient(subscriptionID)
 	lbClient.Authorizer = authorizer
+	lbClient.Client.AddToUserAgent(sampleUA)
 
 	vNetClient = network.NewVirtualNetworksClient(subscriptionID)
 	vNetClient.Authorizer = authorizer
+	vNetClient.Client.AddToUserAgent(sampleUA)
 
 	subnetClient = network.NewSubnetsClient(subscriptionID)
 	subnetClient.Authorizer = authorizer
+	subnetClient.Client.AddToUserAgent(sampleUA)
 
 	pipClient = network.NewPublicIPAddressesClient(subscriptionID)
 	pipClient.Authorizer = authorizer
+	pipClient.Client.AddToUserAgent(sampleUA)
 
 	interfaceClient = network.NewInterfacesClient(subscriptionID)
 	interfaceClient.Authorizer = authorizer
+	interfaceClient.Client.AddToUserAgent(sampleUA)
 
 	availSetClient = compute.NewAvailabilitySetsClient(subscriptionID)
 	availSetClient.Authorizer = authorizer
+	availSetClient.Client.AddToUserAgent(sampleUA)
 
 	accountClient = storage.NewAccountsClient(subscriptionID)
 	accountClient.Authorizer = authorizer
+	accountClient.Client.AddToUserAgent(sampleUA)
 
 	vmClient = compute.NewVirtualMachinesClient(subscriptionID)
 	vmClient.Authorizer = authorizer
+	vmClient.Client.AddToUserAgent(sampleUA)
 }
 
 // buildNATrule returns a network.InboundNatRule struct with all needed fields included.
@@ -392,17 +397,6 @@ func buildVhdURI(storageAccountName, vmName string) string {
 	return fmt.Sprintf("https://%s.blob.core.windows.net/golangcontainer/%s.vhd",
 		storageAccountName,
 		vmName)
-}
-
-// getEnvVarOrExit returns the value of specified environment variable or terminates if it's not defined.
-func getEnvVarOrExit(varName string) string {
-	value := os.Getenv(varName)
-	if value == "" {
-		fmt.Printf("Missing environment variable %s\n", varName)
-		os.Exit(1)
-	}
-
-	return value
 }
 
 // onErrorFail prints a failure message and exits the program if err is not nil.
