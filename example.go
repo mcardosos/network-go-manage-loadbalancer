@@ -216,7 +216,7 @@ func main() {
 
 // createClients initializes and adds token to all needed clients in the sample.
 func createClients(subscriptionID string, authorizer *autorest.BearerAuthorizer) {
-	sampleUA := fmt.Sprintf("Azure-Samples/network-go-manage-loadbalancer/%s", utils.GetCommit())
+	sampleUA := fmt.Sprintf("sample/0006/%s", utils.GetCommit())
 
 	groupClient = resources.NewGroupsClient(subscriptionID)
 	groupClient.Authorizer = authorizer
